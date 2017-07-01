@@ -22,6 +22,7 @@ import threading
 import time
 import types
 import urllib
+import webbrowser
 import FileLock
 
 try:
@@ -152,6 +153,9 @@ class Config:
 		if self.trash_dir:
 			self.trash_dir = trimdir(os.path.abspath(self.trash_dir))
 
+		# user webbrowser
+		self.webbrowser = True if self.get('webbrowser', 'true') == 'true' else False 
+
 		# max retry
 		self.max_retry = int(self.get('max_retry', '3'))
 		
@@ -163,12 +167,12 @@ class Config:
 		self.excludes = json.loads(self.get('excludes', '[]'))
 
 		# GDrive API
-		self.AUTH_TOKEN_URL = "https://login.live.com/oauth20_token.srf"
+		self.API_BASE_URL = "https://api.onedrive.com/v1.0/"
 		self.OAUTH_SCOPE = ['wl.signin', 'wl.offline_access', 'onedrive.readwrite']
 		self.REDIRECT_URI = 'http://localhost:8080'
 		self.client_id = self.get('client_id', '19f839f9-69d9-4e6d-b841-bc39d0c241d8')
 		self.client_secret = self.get('client_secret', '2U0NhMmsKo1iw1RW7fJpjgq')
-		self.token_file = self.get('token_file', '.onedrivesync.json')
+		self.token_file = self.get('token_file', '.onedrivesync.token')
 
 		if os.path.exists(self.token_file):
 			self.last_sync = mtime(self.token_file)
@@ -191,102 +195,124 @@ config = Config()
 # init
 mimetypes.init()
 
+class OneDriveSession(onedrivesdk.session.SessionBase):
+	def __init__(self,
+				 token_type,
+				 expires_in,
+				 scope_string,
+				 access_token,
+				 client_id,
+				 auth_server_url,
+				 redirect_uri,
+				 refresh_token=None,
+				 client_secret=None):
+		self.token_type = token_type
+		self.expires_at = time.time() + int(expires_in)
+		self.scope = scope_string.split(" ")
+		self.access_token = access_token
+		self.client_id = client_id
+		self.auth_server_url = auth_server_url
+		self.redirect_uri = redirect_uri
+		self.refresh_token = refresh_token
+		self.client_secret = client_secret
+
+	def is_expired(self):
+		"""Whether or not the session has expired
+		Returns:
+			bool: True if the session has expired, otherwise false
+		"""
+		# Add a 10 second buffer in case the token is just about to expire
+		return self.expires_at < time.time() - 10
+
+	def refresh_session(self, expires_in, scope_string, access_token, refresh_token):
+		self.expires_at = time.time() + int(expires_in)
+		self.scope = scope_string.split(" ")
+		self.access_token = access_token
+		self.refresh_token = refresh_token
+
+	def save_session(self, **save_session_kwargs):
+		path = save_session_kwargs["path"]
+		
+		with open(path, "w") as f:
+			s = { "token_type": self.token_type,
+					"expires_at": self.expires_at,
+					"scope": ' '.join(self.scope),
+					"access_token": self.access_token,
+					"client_id": self.client_id,
+					"auth_server_url": self.auth_server_url,
+					"redirect_uri": self.redirect_uri,
+					"refresh_token": self.refresh_token,
+					"client_secret": self.client_secret }
+			f.write(json.dumps(s))
+
+	@staticmethod
+	def load_session(**load_session_kwargs):
+		path = load_session_kwargs["path"]
+		
+		with open(path) as f:
+			c = json.loads(f.read())
+			s = OneDriveSession(c["token_type"],
+								0,
+								c["scope"],
+								c["access_token"],
+								c["client_id"],
+								c["auth_server_url"],
+								c["redirect_uri"],
+								c["refresh_token"],
+								c["client_secret"])
+			s.expires_at = c["expires_at"]
+			return s
+
+
 class OneDriveCredentials(object):
 	def __init__(self):
 		self.path = os.path.abspath(config.token_file)
-		self.cred = None
-		self.file = None
 		self.lock = None
 
-	def _load_credentials(self):
+	def _load_credentials(self, client):
 		if os.path.exists(self.path):
-			self.file = open(self.path)
-			try:
-				self.cred = json.loads(self.file.read())
-			except Exception as e:
-				uwarn("Failed to load credentials: " + str(e));
+			client.auth_provider.load_session(path=self.path)
+			client.item(drive="me", id="root").get()
+			return
+		raise Exception('Token file %s not found' % self.path)
 
-	def _save_credentials(self):
-		self.file = open(self.path, 'w')
-		self.file.write(json.dumps(self.cred))
+	def _save_credentials(self, client):
+		client.auth_provider.save_session(path=self.path)
 		touch(self.path, config.last_sync)
 
 	def _lock_credentials(self):
-		FileLock.lock(self.file)
+		FileLock.lock(open(self.path))
 
-	def _authenticate(self, auth_provider, code):
-		"""Takes in a code string, gets the access token,
-		and creates session property bag
-		Args:
-			code (str):
-				The code provided by the oauth provider
-			redirect_uri (str): The URI to redirect the callback
-				to
-			client_secret (str): Defaults to None, the client
-				secret of your app
-			resource (str): Defaults to None,The resource  
-				you want to access
-		"""
-
-		params = {
-			"code": code,
-			"client_id": config.client_id,
-			"client_secret": config.client_secret,
-			"redirect_uri": config.REDIRECT_URI,
-			"grant_type": "authorization_code",
-			"resource": None,
-		}
-
-		headers = {"Content-Type": "application/x-www-form-urlencoded"}
-		response = auth_provider._http_provider.send(method="POST",
-											headers=headers,
-											url=config.AUTH_TOKEN_URL,
-											data=params)
-
-		rcont = json.loads(response.content)
-		return rcont
-
-	def _get_credentials(self, client):
+	def _authenticate(self, client):
 		auth_url = client.auth_provider.get_auth_url(config.REDIRECT_URI)
 
-		# Block thread until we have the code
-		code = GetAuthCodeServer.get_auth_code(auth_url, config.REDIRECT_URI)
-
-		# Finally, authenticate!
-		#client.auth_provider.authenticate(code, config.REDIRECT_URI, config.client_secret)
-		return self._authenticate(client.auth_provider, code)
-
-	def _auth_client(self, client, rcont):
-		client.auth_provider._session = client.auth_provider._session_type(rcont["token_type"],
-								rcont["expires_in"],
-								rcont["scope"],
-								rcont["access_token"],
-								config.client_id,
-								config.AUTH_TOKEN_URL,
-								config.REDIRECT_URI,
-								rcont["refresh_token"] if "refresh_token" in rcont else None,
-								config.client_secret)
-		client.item(drive="me", id="root").get()
+		# Ask for the code
+		uprint('Paste this URL into your browser, approve the app\'s access.')
+		uprint('Copy everything in the address bar after "code=", and paste it below.')
+		uprint(auth_url)
+		if config.webbrowser:
+			webbrowser.open(auth_url)
+		code = raw_input('Paste code here: ')
+		
+		client.auth_provider.authenticate(code, config.REDIRECT_URI, config.client_secret)
 
 	def get_service(self):
-		client = onedrivesdk.get_default_client(client_id=config.client_id,scopes=config.OAUTH_SCOPE)
-
-		self._load_credentials()
-
-		if not self.cred:
-			uinfo("Credentials not found, begin the Oauth process.")
-			self.cred = self._get_credentials(client)
-			self._save_credentials()
+		http_provider = onedrivesdk.HttpProvider()
+		auth_provider = onedrivesdk.AuthProvider(
+			http_provider=http_provider,
+			session_type=OneDriveSession,
+			client_id=config.client_id,
+			scopes=config.OAUTH_SCOPE)
+		
+		client = onedrivesdk.OneDriveClient(config.API_BASE_URL, auth_provider, http_provider)
 
 		try:
-			self._auth_client(client, self.cred)
+			self._load_credentials(client)
 		except Exception as e:
-			uinfo("Failed to authenticate credentials: " + str(e));
-			uinfo("Begin the Oauth process.")
-			self.cred = self._get_credentials(client)
-			self._save_credentials()
-			self._auth_client(client, self.cred)
-			
+			uinfo("Failed to load credentials, begin the OAuth process.")
+			self._authenticate(client)
+			self._save_credentials(client)
+
 		try:
 			self._lock_credentials()
 		except Exception as e:
