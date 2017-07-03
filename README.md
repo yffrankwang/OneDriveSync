@@ -58,4 +58,4 @@ Configure options for file synchronization:
 --------------------
 A token file is created during execution:
 
-* `.onedrivesync.json`: which has the token to authenticate to One Drive
+* `.onedrivesync.token`: which has the token to authenticate to One Drive
