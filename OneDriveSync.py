@@ -36,7 +36,7 @@ from onedrivesdk.helpers import GetAuthCodeServer
 LTZ = tzlocal.get_localzone()
 SENC = sys.getdefaultencoding()
 FENC = sys.getfilesystemencoding()
-DT1970 = datetime.datetime.fromtimestamp(0).replace(tzinfo=LTZ)
+DT1970 = datetime.datetime.fromtimestamp(0)
 SMALL = 2 * 1024 * 1024
 LOG = None
 
@@ -100,13 +100,13 @@ def szstr(n):
 	return "{:,}".format(n)
 
 def tmstr(t):
-	return t.strftime('%Y-%m-%dT%H:%M:%S%z')
+	return t.strftime('%Y-%m-%d %H:%M:%S')
 
-def utime(d):
-	return d.astimezone(pytz.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+def mtstr(t):
+	return LTZ.localize(t).astimezone(pytz.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
 
 def mtime(p):
-	return datetime.datetime.fromtimestamp(os.path.getmtime(p)).replace(microsecond=0, tzinfo=LTZ)
+	return datetime.datetime.fromtimestamp(os.path.getmtime(p)).replace(microsecond=0)
 
 def ftime(dt):
 	return tseconds(dt - DT1970)
@@ -115,7 +115,7 @@ def tseconds(td):
 	return (td.seconds + td.days * 24 * 3600)
 
 def touch(p, d = None):
-	atime = ftime(datetime.datetime.now().replace(tzinfo=LTZ))
+	atime = ftime(datetime.datetime.now())
 	mtime = atime if d is None else ftime(d)
 	os.utime(p, ( atime, mtime ))
 
@@ -365,7 +365,7 @@ class OFile:
 			if s > 0:
 				t = t[0:s]
 			md = datetime.datetime.strptime(t, "%Y-%m-%dT%H:%M:%S")
-			return md.replace(tzinfo=pytz.utc).astimezone(LTZ)
+			return md.replace(tzinfo=pytz.utc).astimezone(LTZ).replace(tzinfo=None)
 		else:
 			return None
 
@@ -423,12 +423,12 @@ class OneDriveSync:
 			if f.folder:
 				uprint(u"== %s ==" % (f.path))
 			elif f.parent and f.parent != '/' and f.path[0] != '?':
-				uprint(u"    %s [%s] (%s)" % (f.name, szstr(f.size), tmstr(f.mdate)))
+				uprint(u"    %-40s [%11s] (%s)" % (f.name, szstr(f.size), tmstr(f.mdate)))
 			else:
-				uprint(u"%s [%s] (%s)" % (f.path, szstr(f.size), tmstr(f.mdate)))
+				uprint(u"%-44s [%11s] (%s)" % (f.path, szstr(f.size), tmstr(f.mdate)))
 
 		uprint("--------------------------------------------------------------------------------")
-		uprint("Total %d items [%s]" % (len(paths), szstr(tz)))
+		uprint("Total %s items [%s]" % (szstr(len(paths)), szstr(tz)))
 	
 	def print_updates(self, files):
 		if files:
@@ -453,7 +453,7 @@ class OneDriveSync:
 			uprint(u"%s %s [%s] (%s)" % ('=' if f.folder else ' ', f.name, szstr(f.size), tmstr(f.mdate)))
 
 		uprint("--------------------------------------------------------------------------------")
-		uprint("Unknown %d items [%d]" % (len(unknowns), szstr(tz)))
+		uprint("Unknown %s items [%s]" % (szstr(len(unknowns)), szstr(tz)))
 	
 	def get(self, fid):
 		r = self.service.item(drive="me", id=fid)
@@ -999,7 +999,7 @@ class OneDriveSync:
 
 
 	def up_to_date(self):
-		self.service.save_session(path=config.token_file)
+		self.service.auth_provider.save_session(path=config.token_file)
 		touch(config.token_file)
 
 	def to_ofile(self, r, root):
@@ -1135,7 +1135,7 @@ class OneDriveSync:
 		'''
 		uinfo("%s ^PATCH^  %s [%s] (%s)" % (self.prog, rf.path, szstr(rf.size), tmstr(mt)))
 
-		i = { "id": rf.id, "fileSystemInfo": { "lastModifiedDateTime": utime(mt) } }
+		i = { "id": rf.id, "fileSystemInfo": { "lastModifiedDateTime": mtstr(mt) } }
 
 		def exef(a):
 			self.service.item(drive="me", id=rf.id).update(i)
@@ -1178,7 +1178,7 @@ class OneDriveSync:
 			
 			shutil.move(lf.npath, np)
 		else:
-			uinfo("%s >REMOVE>  %s" % (self.prog, lf.path))
+			uinfo("%s >REMOVE> %s" % (self.prog, lf.path))
 			os.remove(lf.npath)
 
 	def remove_local_file(self, lf):
@@ -1281,7 +1281,7 @@ def main(args):
 				continue
 			if opt == 'all':
 				all = True
-				continue			
+				continue
 			ch = opt[0]
 			if ch == '+':
 				config.includes = opt[1:].split()
