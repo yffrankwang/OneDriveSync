@@ -36,7 +36,7 @@ from onedrivesdk.helpers import GetAuthCodeServer
 LTZ = tzlocal.get_localzone()
 SENC = sys.getdefaultencoding()
 FENC = sys.getfilesystemencoding()
-DT1970 = datetime.datetime(1970,1,1).replace(tzinfo=pytz.utc)
+DT1970 = datetime.datetime.fromtimestamp(0).replace(tzinfo=LTZ)
 SMALL = 2 * 1024 * 1024
 LOG = None
 
@@ -99,8 +99,8 @@ def uexception(ex):
 def szstr(n):
 	return "{:,}".format(n)
 
-def mtstr(t):
-	return t.strftime('%Y-%m-%dT%H:%M:%S')
+def tmstr(t):
+	return t.strftime('%Y-%m-%dT%H:%M:%S%z')
 
 def utime(d):
 	return d.astimezone(pytz.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
@@ -109,7 +109,7 @@ def mtime(p):
 	return datetime.datetime.fromtimestamp(os.path.getmtime(p)).replace(microsecond=0, tzinfo=LTZ)
 
 def ftime(dt):
-	return tseconds(dt.astimezone(pytz.utc) - DT1970)
+	return tseconds(dt - DT1970)
 
 def tseconds(td):
 	return (td.seconds + td.days * 24 * 3600)
@@ -125,6 +125,9 @@ def mkpdirs(p):
 		os.makedirs(d)
 
 def trimdir(p):
+	if p == '':
+		return p
+
 	if p[-1] == os.path.sep:
 		p = p[:-1]
 	return unicode(p)
@@ -227,8 +230,8 @@ class OneDriveSession(onedrivesdk.session.SessionBase):
 		Returns:
 			bool: True if the session has expired, otherwise false
 		"""
-		# Add a 10 second buffer in case the token is just about to expire
-		return self.expires_at < time.time() - 10
+		# Add a 60 second buffer in case the token is just about to expire
+		return self.expires_at < time.time() - 60
 
 	def refresh_session(self, expires_in, scope_string, access_token, refresh_token):
 		self.expires_at = time.time() + int(expires_in)
@@ -381,14 +384,21 @@ class OneDriveSync:
 		self.skips = []
 
 	def exea(self, api, msg):
+		auth = False
 		cnt = 0
 		while True:
 			try:
 				cnt += 1
+				if auth:
+					self.service.auth_provider.refresh_token()
+					auth = True
 				return api.execute()
 			except Exception as e:
 				if cnt <= config.max_retry:
-					uwarn(str(e))
+					err = str(e)
+					if "unauthenticated" in err:
+						auth = True
+					uwarn(err)
 					uwarn("Failed to %s, retry %d" % (msg, cnt))
 					time.sleep(3)
 				else:
@@ -413,26 +423,26 @@ class OneDriveSync:
 			if f.folder:
 				uprint(u"== %s ==" % (f.path))
 			elif f.parent and f.parent != '/' and f.path[0] != '?':
-				uprint(u"    %-40s  %8d  %s" % (f.name, f.size, f.mdate.strftime('%Y-%m-%dT%H:%M:%S')))
+				uprint(u"    %s [%s] (%s)" % (f.name, szstr(f.size), tmstr(f.mdate)))
 			else:
-				uprint(u"%-44s  %8d  %s" % (f.path, f.size, f.mdate.strftime('%Y-%m-%dT%H:%M:%S')))
+				uprint(u"%s [%s] (%s)" % (f.path, szstr(f.size), tmstr(f.mdate)))
 
 		uprint("--------------------------------------------------------------------------------")
-		uprint("Total %d items (%d)" % (len(paths), tz))
+		uprint("Total %d items [%s]" % (len(paths), szstr(tz)))
 	
 	def print_updates(self, files):
 		if files:
 			uprint("--------------------------------------------------------------------------------")
 			uinfo("Files to be synchronized:")
 			for f in files:
-				uprint("%s: %s  [%d] (%s) %s" % (f.action, f.path, f.size, str(f.mdate), f.reason))
+				uprint(u"%s: %s [%s] (%s) %s" % (f.action, f.path, szstr(f.size), tmstr(f.mdate), f.reason))
 
 	def print_skips(self, files):
 		if files:
 			uprint("--------------------------------------------------------------------------------")
 			uprint("Skipped files:")
 			for f in files:
-				uprint("%s: %s  [%s] (%s) %s" % (f.action, f.path, szstr(f.fsize), str(f.mdate), f.reason))
+				uprint(u"%s: %s [%s] (%s) %s" % (f.action, f.path, szstr(f.size), tmstr(f.mdate), f.reason))
 
 	def unknown_files(self, unknowns):
 		uprint("--------------------------------------------------------------------------------")
@@ -440,10 +450,10 @@ class OneDriveSync:
 		tz = 0
 		for f in unknowns.values():
 			tz += f.size
-			uprint(u"%s %-44s  %8d  %s %s" % ('=' if f.folder else ' ', f.name, f.size, f.mdate.strftime('%Y-%m-%dT%H:%M:%S')))
+			uprint(u"%s %s [%s] (%s)" % ('=' if f.folder else ' ', f.name, szstr(f.size), tmstr(f.mdate)))
 
 		uprint("--------------------------------------------------------------------------------")
-		uprint("Unknown %d items (%d)" % (len(unknowns), tz))
+		uprint("Unknown %d items [%d]" % (len(unknowns), szstr(tz)))
 	
 	def get(self, fid):
 		r = self.service.item(drive="me", id=fid)
@@ -457,21 +467,44 @@ class OneDriveSync:
 		uinfo('Get remote files ...')
 		return self._list(False, verb, unknown)
 
-	def _alist(self, id):
+	def _alist(self, fid):
 		def exef(a):
-			return self.service.item(drive="me", id=id).children.request(top=1000).get()
-			
+			return self.service.item(drive="me", id=fid).children.request(top=1000).get()
+
+		items = []
 		a = Obj()
 		a.execute = types.MethodType(exef, a)
-		return self.exea(a, "children.get")
+		r = self.exea(a, "children.get");
+		items.extend(r)
 		
-	def _rlist(self, files, unknowns, id, path, lvl):
+		self._anext(r, items)
+		return items
+
+	def _anext(self, c, items):
+		if not hasattr(c, "_next_page_link"):
+			return
+		
+		sys.stdout.write(" .")
+		sys.stdout.flush()
+
+		def exef(a):
+			return onedrivesdk.ChildrenCollectionRequest.get_next_page_request(c, self.service).get();
+		
+		a = Obj()
+		a.execute = types.MethodType(exef, a)
+		r = self.exea(a, "children.next");
+		if r:
+			items.extend(r)
+			self._anext(r, items)
+		
+	def _rlist(self, files, unknowns, fid, path, lvl):
 		if not self.accept_path(path):
 			return
 
 		sys.stdout.write("\r> " + path.ljust(78))
+		sys.stdout.flush()
 
-		items = self._alist(id)
+		items = self._alist(fid)
 		for r in items:
 #			uprint("-------------")
 #			uprint(str(r))
@@ -631,7 +664,7 @@ class OneDriveSync:
 			rf = self.rpaths.get(lp)
 			if rf and lf.size == rf.size and math.fabs(tseconds(lf.mdate - rf.mdate)) > 2:
 				lf.action = '^~'
-				lf.reason = '| <> R:' + str(rf.mdate)
+				lf.reason = '| <> R:' + tmstr(rf.mdate)
 				lps.append(lp)
 
 		lps.sort()
@@ -655,7 +688,7 @@ class OneDriveSync:
 			lf = self.lpaths.get(rp)
 			if lf and lf.size == rf.size and math.fabs(tseconds(rf.mdate - lf.mdate)) > 2:
 				rf.action = '>~'
-				rf.reason = '| <> L:' + str(lf.mdate)
+				rf.reason = '| <> L:' + tmstr(lf.mdate)
 				rps.append(rp)
 
 		rps.sort()
@@ -690,7 +723,7 @@ class OneDriveSync:
 						if not force or lf.size == rf.size:
 							continue
 					lf.action = '^*'
-					lf.reason = '| > R:' + str(rf.mdate)
+					lf.reason = '| > R:' + tmstr(rf.mdate)
 				elif lastsync:
 					if tseconds(lf.mdate - lastsync) > 2:
 						lf.action = '^+'
@@ -752,7 +785,7 @@ class OneDriveSync:
 						if not force or lf.size == rf.size:
 							continue
 					rf.action = '>*'
-					rf.reason = '| > L:' + str(lf.mdate)
+					rf.reason = '| > L:' + tmstr(lf.mdate)
 				elif lastsync:
 					if tseconds(rf.mdate - lastsync) > 2:
 						rf.action = '>+'
@@ -886,7 +919,7 @@ class OneDriveSync:
 					return
 			self.touch_files(pfiles)
 			uprint("--------------------------------------------------------------------------------")
-			uinfo("TOUTH Completed!")
+			uinfo("TOUCH Completed!")
 		else:
 			uinfo('No files need to be touched.')
 
@@ -912,6 +945,7 @@ class OneDriveSync:
 			uprint("--------------------------------------------------------------------------------")
 			uinfo("PUSH %s Completed!" % ('(FORCE)' if force else ''))
 		else:
+			uprint("--------------------------------------------------------------------------------")
 			uinfo('No files need to be uploaded to remote server.')
 
 	def pull(self, force = False, noprompt = False):
@@ -933,8 +967,10 @@ class OneDriveSync:
 			self.dnload_files(dfiles)
 			if force:
 				self.up_to_date()
+			uprint("--------------------------------------------------------------------------------")
 			uinfo("PULL %s Completed!" % ('(FORCE)' if force else ''))
 		else:
+			uprint("--------------------------------------------------------------------------------")
 			uinfo('No files need to be downloaded to local.')
 
 	def sync(self, noprompt):
@@ -958,10 +994,12 @@ class OneDriveSync:
 			uinfo("SYNC Completed!")
 		else:
 			self.up_to_date()
+			uprint("--------------------------------------------------------------------------------")
 			uinfo('No files need to be synchronized.')
 
 
 	def up_to_date(self):
+		self.service.save_session(path=config.token_file)
 		touch(config.token_file)
 
 	def to_ofile(self, r, root):
@@ -986,8 +1024,13 @@ class OneDriveSync:
 		if pid is None:
 			pid = "root"
 
-		r = self.service.item(drive="me", id=pid).children.add(i)
-		
+		def exef(a):
+			return self.service.item(drive="me", id=pid).children.add(i)
+			
+		a = Obj()
+		a.execute = types.MethodType(exef, a)
+		r = self.exea(a, "create")
+
 		f = self.to_ofile(r, True if pid == "root" else False)
 		return f
 
@@ -1013,21 +1056,28 @@ class OneDriveSync:
 		"""
 		Move a remote file to the trash.
 		"""
-		uinfo("%s ^TRASH^  %s [%d] (%s)" % (self.prog, file.path, file.size, str(file.mdate)))
+		uinfo("%s ^TRASH^  %s [%s] (%s)" % (self.prog, file.path, szstr(file.size), tmstr(file.mdate)))
 
-		self.service.item(drive="me", id=file.id).delete()
+		def exef(a):
+			return self.service.item(drive="me", id=file.id).delete()
+			
+		a = Obj()
+		a.execute = types.MethodType(exef, a)
+		self.exea(a, "trash")
+
 		self.rfiles.pop(file.id, file)
 		self.rpaths.pop(file.path, file)
 
 	def insert_remote_file(self, pf, lf):
 		if lf.size > config.max_file_size:
-			uwarn("%s Unable to upload %s, File size [%s] exceed the limit" % (self.prog, lf.name, szstr(lf.size)))
+			self.skips.append(lf)
+			uwarn("%s Unable to upload %s, File size [%s] exceed the limit" % (self.prog, lf.path, szstr(lf.size)))
 			return
 
 		'''
 		Insert a file to onedrive.
 		'''
-		uinfo("%s ^UPLOAD^ %s [%d] (%s)" % (self.prog, lf.path, lf.size, str(lf.mdate)))
+		uinfo("%s ^UPLOAD^ %s [%s] (%s)" % (self.prog, lf.path, szstr(lf.size), tmstr(lf.mdate)))
 
 		pid = "root" if pf is None else pf.id
 
@@ -1045,20 +1095,21 @@ class OneDriveSync:
 
 	def update_remote_file(self, rf, lf):
 		if lf.size > config.max_file_size:
-			uwarn("%s Unable to update %s, File size [%s] exceed the limit" % (self.prog, lf.name, szstr(lf.size)))
+			self.skips.append(lf)
+			uwarn("%s Unable to update %s, File size [%s] exceed the limit" % (self.prog, lf.path, szstr(lf.size)))
 			return
 
 		'''
 		Update a file to onedrive.
 		'''
-		uinfo("%s ^UPDATE^ %s [%d] (%s)" % (self.prog, rf.path, lf.size, str(lf.mdate)))
+		uinfo("%s ^UPDATE^ %s [%s] (%s)" % (self.prog, rf.path, szstr(lf.size), tmstr(lf.mdate)))
 
 		def exef(a):
 			return self.service.item(drive="me", id=rf.id).upload(lf.npath)
 			
 		a = Obj()
 		a.execute = types.MethodType(exef, a)
-		self.exea(a, "upload")
+		self.exea(a, "update")
 
 		rf.size = lf.size
 		
@@ -1066,7 +1117,7 @@ class OneDriveSync:
 		return rf
 
 	def download_remote_file(self, rf):
-		uinfo("%s >DNLOAD> %s [%d] (%s)" % (self.prog, rf.path, rf.size, str(rf.mdate)))
+		uinfo("%s >DNLOAD> %s [%s] (%s)" % (self.prog, rf.path, szstr(rf.size), tmstr(rf.mdate)))
 		
 		mkpdirs(rf.npath)
 
@@ -1082,7 +1133,7 @@ class OneDriveSync:
 		'''
 		Patch a remote file.
 		'''
-		uinfo("%s ^PATCH^  %s [%d] (%s)" % (self.prog, rf.path, rf.size, str(mt)))
+		uinfo("%s ^PATCH^  %s [%s] (%s)" % (self.prog, rf.path, szstr(rf.size), tmstr(mt)))
 
 		i = { "id": rf.id, "fileSystemInfo": { "lastModifiedDateTime": utime(mt) } }
 
@@ -1091,7 +1142,7 @@ class OneDriveSync:
 
 		a = Obj()
 		a.execute = types.MethodType(exef, a)
-		self.exea(a, 'update')
+		self.exea(a, 'patch')
 
 		rf.mdate = mt
 		return rf
@@ -1100,20 +1151,19 @@ class OneDriveSync:
 		'''
 		Touch a local file.
 		'''
-		uinfo("%s >TOUTH>  %s [%d] (%s)" % (self.prog, lf.path, lf.size, str(mt)))
+		uinfo("%s >TOUCH>  %s [%s] (%s)" % (self.prog, lf.path, szstr(lf.size), tmstr(mt)))
 
-		ft = ftime(mt)
-		os.utime(lf.npath, (ft, ft))
+		touch(lf.npath, mt)
 
 		lf.mdate = mt
 		return lf
 
-	def create_local_dirs(self, file):
+	def create_local_dirs(self, lf):
 		np = file.npath
 		if os.path.exists(np):
 			return
 
-		uinfo("%s >CREATE> %s" % (self.prog, file.path))
+		uinfo("%s >CREATE> %s" % (self.prog, lf.path))
 		os.makedirs(np)
 
 	def trash_local_file(self, lf):
