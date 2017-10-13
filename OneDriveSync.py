@@ -16,7 +16,6 @@ import logging
 import datetime
 import traceback
 import pytz, tzlocal
-import mimetypes
 import unicodedata
 import threading
 import time
@@ -200,9 +199,6 @@ class Config:
 
 # global config
 config = Config()
-
-# init
-mimetypes.init()
 
 class OneDriveSession(onedrivesdk.session.SessionBase):
 	def __init__(self,
@@ -515,7 +511,7 @@ class OneDriveSync:
 				unknowns[f.id] = f
 				continue
 			
-			# ignore online google docs
+			# ignore online docs
 			if not f.folder and not f.url:
 				unknowns[f.id] = f
 				continue
@@ -613,16 +609,15 @@ class OneDriveSync:
 				if not self.accept_path(rp):
 					continue
 
-				gf = OFile()
-				gf.folder = True
-				gf.name = d
-				gf.parent = os.path.dirname(rp)
-				gf.npath = np
-				gf.path = normpath(rp)
-				gf.size = 0
-				gf.mdate = mtime(np)
-				gf.mime ='application/vnd.google-apps.folder'
-				lpaths[gf.path] = gf
+				of = OFile()
+				of.folder = True
+				of.name = d
+				of.parent = os.path.dirname(rp)
+				of.npath = np
+				of.path = normpath(rp)
+				of.size = 0
+				of.mdate = mtime(np)
+				lpaths[of.path] = of
 
 			for f in filenames:
 				if f[0] == '.':
@@ -633,17 +628,16 @@ class OneDriveSync:
 				if not self.accept_path(rp):
 					continue
 
-				gf = OFile()
-				gf.folder = False
-				gf.name = f
-				gf.parent = os.path.dirname(rp)
-				gf.npath = np
-				gf.path = normpath(rp)
-				gf.size = os.path.getsize(np)
-				gf.mdate = mtime(np)
+				of = OFile()
+				of.folder = False
+				of.name = f
+				of.parent = os.path.dirname(rp)
+				of.npath = np
+				of.path = normpath(rp)
+				of.size = os.path.getsize(np)
+				of.mdate = mtime(np)
 				ext = os.path.splitext(f)[1]
-				gf.mime = mimetypes.types_map.get(ext, 'application/octet-stream')
-				lpaths[gf.path] = gf
+				lpaths[of.path] = of
 
 		self.lpaths = lpaths
 		
@@ -935,7 +929,7 @@ class OneDriveSync:
 		
 		if ufiles:
 			if not noprompt:
-				ans = raw_input("Are you sure to push %d files to Google Drive? (Y/N): " % len(ufiles))
+				ans = raw_input("Are you sure to push %d files to One Drive? (Y/N): " % len(ufiles))
 				if ans.lower() != "y":
 					return
 
@@ -1187,7 +1181,7 @@ class OneDriveSync:
 		if os.path.exists(np):
 			os.rmdir(np)
 
-def help():
+def showUsage():
 	print("OneDriveSync.py <command> ...")
 	print("  <command>: ")
 	print("    help                print command usage")
@@ -1257,7 +1251,7 @@ def main(args):
 		cmd = args[0]
 
 	if cmd == 'help':
-		help()
+		showUsage()
 		exit(0)
 
 	uinfo('Start...')
@@ -1315,7 +1309,7 @@ def main(args):
 	elif cmd == 'touch':
 		gs.touch(True if 'go' in args else False)
 	else:
-		help()
+		showUsage()
 
 
 if __name__ == "__main__":
