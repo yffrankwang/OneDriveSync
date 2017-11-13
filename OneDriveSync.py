@@ -428,8 +428,6 @@ class OneDriveSync:
 	
 	def print_updates(self, files):
 		if files:
-			uprint("--------------------------------------------------------------------------------")
-			uinfo("Files to be synchronized:")
 			for f in files:
 				uprint(u"%s: %s [%s] (%s) %s" % (f.action, f.path, szstr(f.size), tmstr(f.mdate), f.reason))
 
@@ -666,7 +664,6 @@ class OneDriveSync:
 		for lp in lps:
 			ufiles.append(self.lpaths[lp])
 		
-		self.print_updates(ufiles)
 		return ufiles
 
 	"""
@@ -690,7 +687,6 @@ class OneDriveSync:
 		for rp in rps:
 			ufiles.append(self.rpaths[rp])
 		
-		self.print_updates(ufiles)
 		return ufiles
 
 	"""
@@ -751,8 +747,7 @@ class OneDriveSync:
 			rps.sort(reverse=True)
 			for rp in rps:
 				ufiles.append(self.rpaths[rp])
-			
-		self.print_updates(ufiles)
+
 		return ufiles
 
 	"""
@@ -815,7 +810,6 @@ class OneDriveSync:
 			for lp in lps:
 				ufiles.append(self.lpaths[lp])
 
-		self.print_updates(ufiles)
 		return ufiles
 
 	"""
@@ -888,7 +882,12 @@ class OneDriveSync:
 
 		pfiles = self.find_remote_patches()
 		if pfiles:
+			uprint("--------------------------------------------------------------------------------")
+			uinfo("Files to be synchronized:")
+			self.print_updates(pfiles)
+
 			if not noprompt:
+				uprint("--------------------------------------------------------------------------------")
 				ans = raw_input("Are you sure to patch %d remote files? (Y/N): " % (len(pfiles)))
 				if ans.lower() != "y":
 					return
@@ -907,7 +906,12 @@ class OneDriveSync:
 
 		pfiles = self.find_local_touches()
 		if pfiles:
+			uprint("--------------------------------------------------------------------------------")
+			uinfo("Files to be synchronized:")
+			self.print_updates(pfiles)
+
 			if not noprompt:
+				uprint("--------------------------------------------------------------------------------")
 				ans = raw_input("Are you sure to touch %d local files? (Y/N): " % (len(pfiles)))
 				if ans.lower() != "y":
 					return
@@ -928,7 +932,12 @@ class OneDriveSync:
 		ufiles = self.find_local_updates(None, force)
 		
 		if ufiles:
+			uprint("--------------------------------------------------------------------------------")
+			uinfo("Files to be synchronized:")
+			self.print_updates(ufiles)
+
 			if not noprompt:
+				uprint("--------------------------------------------------------------------------------")
 				ans = raw_input("Are you sure to push %d files to One Drive? (Y/N): " % len(ufiles))
 				if ans.lower() != "y":
 					return
@@ -953,7 +962,12 @@ class OneDriveSync:
 		dfiles = self.find_remote_updates(None, force)
 		
 		if dfiles:
+			uprint("--------------------------------------------------------------------------------")
+			uinfo("Files to be synchronized:")
+			self.print_updates(dfiles)
+
 			if not noprompt:
+				uprint("--------------------------------------------------------------------------------")
 				ans = raw_input("Are you sure to pull %d files to local? (Y/N): " % len(dfiles))
 				if ans.lower() != "y":
 					return
@@ -978,10 +992,16 @@ class OneDriveSync:
 		sfiles = self.find_sync_files()
 		
 		if sfiles:
+			uprint("--------------------------------------------------------------------------------")
+			uinfo("Files to be synchronized:")
+			self.print_updates(sfiles)
+
 			if not noprompt:
+				uprint("--------------------------------------------------------------------------------")
 				ans = raw_input("Are you sure to sync %d files? (Y/N): " % len(sfiles))
 				if ans.lower() != "y":
 					return
+
 			self.sync_files(sfiles)
 			self.up_to_date()
 			uprint("--------------------------------------------------------------------------------")
