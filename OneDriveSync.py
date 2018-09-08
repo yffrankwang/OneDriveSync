@@ -656,7 +656,7 @@ class OneDriveSync:
 			rf = self.rpaths.get(lp)
 			if rf and lf.size == rf.size and math.fabs(tseconds(lf.mdate - rf.mdate)) > 2:
 				lf.action = '^~'
-				lf.reason = '| <> R:' + tmstr(rf.mdate)
+				lf.reason = '| <> R:[' + szstr(rf.size) + '] ' + tmstr(rf.mdate)
 				lps.append(lp)
 
 		lps.sort()
@@ -679,7 +679,7 @@ class OneDriveSync:
 			lf = self.lpaths.get(rp)
 			if lf and lf.size == rf.size and math.fabs(tseconds(rf.mdate - lf.mdate)) > 2:
 				rf.action = '>~'
-				rf.reason = '| <> L:' + tmstr(lf.mdate)
+				rf.reason = '| <> L:[' + szstr(lf.size) + '] ' + tmstr(lf.mdate)
 				rps.append(rp)
 
 		rps.sort()
@@ -713,7 +713,7 @@ class OneDriveSync:
 						if not force or lf.size == rf.size:
 							continue
 					lf.action = '^*'
-					lf.reason = '| > R:' + tmstr(rf.mdate)
+					lf.reason = '| > R:[' + szstr(rf.size) + '] ' + tmstr(rf.mdate)
 				elif lastsync:
 					if tseconds(lf.mdate - lastsync) > 2:
 						lf.action = '^+'
@@ -774,7 +774,7 @@ class OneDriveSync:
 						if not force or lf.size == rf.size:
 							continue
 					rf.action = '>*'
-					rf.reason = '| > L:' + tmstr(lf.mdate)
+					rf.reason = '| > L:[' + szstr(lf.size) + '] ' + tmstr(lf.mdate)
 				elif lastsync:
 					if tseconds(rf.mdate - lastsync) > 2:
 						rf.action = '>+'
