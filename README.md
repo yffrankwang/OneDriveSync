@@ -9,7 +9,8 @@ One Drive Synchronize Command Line Tool.
 
 Install dependencies
 
-    pip install --upgrade pytz tzlocal python-dateutil onedrivesdk exifread 
+    pip install --upgrade pytz tzlocal python-dateutil exifread 
+    pip install onedrivesdk==1.1.8
 
 On Windows, download and install [pwin32](https://sourceforge.net/projects/pywin32/).
 
