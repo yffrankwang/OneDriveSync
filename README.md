@@ -12,11 +12,9 @@ Install dependencies
     pip install --upgrade pytz tzlocal python-dateutil exifread 
     pip install onedrivesdk==1.1.8
 
-On Windows, download and install [pwin32](https://sourceforge.net/projects/pywin32/).
-
 Using git to get source
 
-    git clone https://github.com/pandafw/OneDriveSync.git
+    git clone https://github.com/yffrankwang/OneDriveSync.git
     
 Configure options for file synchronization:
 
