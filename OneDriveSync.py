@@ -5,7 +5,6 @@ OneDriveSync
 
 Sync files in local directory to a One Drive directory.
 '''
-import codecs
 import json
 import math
 import fnmatch
@@ -139,9 +138,7 @@ class Config:
 		for filename in paths:
 			if os.path.exists(filename):
 				uprint('using onedrivesync.ini file "%s"' % os.path.abspath(filename))
-				fp = codecs.open(filename, "r", "utf-8")
-				self.dict.readfp(fp)
-				fp.close()
+				self.dict.read(filename, 'utf-8')
 				break
 
 		# debug
