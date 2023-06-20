@@ -101,7 +101,7 @@ def tmstr(t):
 	return t.strftime('%Y-%m-%d %H:%M:%S')
 
 def mtstr(t):
-	return LTZ.localize(t).astimezone(pytz.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+	return t.replace(tzinfo=LTZ).astimezone(pytz.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
 
 def mtime(p):
 	return datetime.datetime.fromtimestamp(os.path.getmtime(p)).replace(microsecond=0)
